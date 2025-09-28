@@ -1,4 +1,4 @@
-name: Builder
+name: CI
 
 env:
   BUILD_ARGS: "--test"
@@ -49,7 +49,6 @@ jobs:
         arch: ["armhf", "armv7", "aarch64", "amd64", "i386"]
     permissions:
       contents: read
-      packages: write
 
     steps:
       - name: Check out repository
@@ -70,21 +69,10 @@ jobs:
           elif [[ "${{ steps.info.outputs.architectures }}" =~ ${{ matrix.arch }} ]]; then
             echo "build_arch=true" >> $GITHUB_OUTPUT;
             echo "image=$(echo ${{ steps.info.outputs.image }} | cut -d'/' -f3)" >> $GITHUB_OUTPUT;
-            if [[ -z "${{ github.head_ref }}" ]] && [[ "${{ github.event_name }}" == "push" ]]; then
-                echo "BUILD_ARGS=" >> $GITHUB_ENV;
-            fi
           else
             echo "${{ matrix.arch }} is not a valid arch for this add-on, skipping build";
             echo "build_arch=false" >> $GITHUB_OUTPUT;
           fi
-
-      - name: Login to GitHub Container Registry
-        if: env.BUILD_ARGS != '--test'
-        uses: docker/login-action@v3.5.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build add-on
         if: steps.check.outputs.build_arch == 'true'
