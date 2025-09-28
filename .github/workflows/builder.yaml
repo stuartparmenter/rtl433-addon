@@ -1,0 +1,99 @@
+name: Builder
+
+env:
+  BUILD_ARGS: "--test"
+  MONITORED_FILES: "build.yaml config.yaml Dockerfile run.sh rtl_433.conf.template"
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  init:
+    runs-on: ubuntu-latest
+    name: Initialize builds
+    outputs:
+      changed: ${{ steps.changed_addons.outputs.changed }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v5.0.0
+
+      - name: Get changed files
+        id: changed_files
+        uses: tj-actions/changed-files@v47
+
+      - name: Check if add-on files changed
+        id: changed_addons
+        run: |
+          for file in ${{ env.MONITORED_FILES }}; do
+            if [[ "${{ steps.changed_files.outputs.all_changed_files }}" =~ $file ]]; then
+              echo "Add-on files changed, triggering build";
+              echo "changed=true" >> $GITHUB_OUTPUT;
+              exit 0
+            fi
+          done
+          echo "No monitored files changed (${{ env.MONITORED_FILES }})";
+          echo "changed=false" >> $GITHUB_OUTPUT;
+
+  build:
+    needs: init
+    runs-on: ubuntu-latest
+    if: needs.init.outputs.changed == 'true'
+    name: Build ${{ matrix.arch }} add-on
+    strategy:
+      matrix:
+        arch: ["armhf", "armv7", "aarch64", "amd64", "i386"]
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5.0.0
+
+      - name: Get information
+        id: info
+        uses: home-assistant/actions/helpers/info@master
+        with:
+          path: "./"
+
+      - name: Check if add-on should be built
+        id: check
+        run: |
+          if [[ "${{ steps.info.outputs.image }}" == "null" ]]; then
+            echo "Image property is not defined, skipping build"
+            echo "build_arch=false" >> $GITHUB_OUTPUT;
+          elif [[ "${{ steps.info.outputs.architectures }}" =~ ${{ matrix.arch }} ]]; then
+            echo "build_arch=true" >> $GITHUB_OUTPUT;
+            echo "image=$(echo ${{ steps.info.outputs.image }} | cut -d'/' -f3)" >> $GITHUB_OUTPUT;
+            if [[ -z "${{ github.head_ref }}" ]] && [[ "${{ github.event_name }}" == "push" ]]; then
+                echo "BUILD_ARGS=" >> $GITHUB_ENV;
+            fi
+          else
+            echo "${{ matrix.arch }} is not a valid arch for this add-on, skipping build";
+            echo "build_arch=false" >> $GITHUB_OUTPUT;
+          fi
+
+      - name: Login to GitHub Container Registry
+        if: env.BUILD_ARGS != '--test'
+        uses: docker/login-action@v3.5.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build add-on
+        if: steps.check.outputs.build_arch == 'true'
+        uses: home-assistant/builder@2025.09.0
+        with:
+          args: |
+            ${{ env.BUILD_ARGS }} \
+            --${{ matrix.arch }} \
+            --target /data \
+            --image "${{ steps.check.outputs.image }}" \
+            --docker-hub "ghcr.io/${{ github.repository_owner }}" \
+            --addon
