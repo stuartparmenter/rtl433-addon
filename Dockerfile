@@ -19,13 +19,13 @@ WORKDIR /build
 # --- Stage: Build librtlsdr ---
 FROM builder as librtlsdr_builder
 
-ARG librtlsdrRepo=https://github.com/librtlsdr/librtlsdr
+ARG librtlsdrGitRevision=cd36c28815592af4080d71181964909125a74f44 # v0.9.0
 
 WORKDIR /build
-RUN git clone ${librtlsdrRepo}
+RUN git clone https://github.com/librtlsdr/librtlsdr
 WORKDIR /build/librtlsdr
 
-RUN git checkout master
+RUN git checkout ${librtlsdrGitRevision}
 
 # Build and install to staging root
 RUN mkdir build && cd build && \
@@ -43,7 +43,7 @@ WORKDIR /build
 RUN git clone https://github.com/merbanan/rtl_433
 WORKDIR /build/rtl_433
 
-ARG rtl433GitRevision=25.02
+ARG rtl433GitRevision=ea7d504877df751a202432d47dbb0c425ab0a93c # 25.12
 RUN git checkout ${rtl433GitRevision}
 
 # Build and install to staging root
