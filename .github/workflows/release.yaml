@@ -47,7 +47,7 @@ jobs:
           ARCH: ${{ matrix.arch }}
         run: |
           echo "build_from=$(yq ".build_from.${ARCH}" build.yaml)" >> $GITHUB_OUTPUT
-          echo "librtlsdr_repo=$(yq '.args.librtlsdrRepo' build.yaml)" >> $GITHUB_OUTPUT
+          echo "librtlsdr_git_revision=$(yq '.args.librtlsdrGitRevision' build.yaml)" >> $GITHUB_OUTPUT
           echo "rtl433_git_revision=$(yq '.args.rtl433GitRevision' build.yaml)" >> $GITHUB_OUTPUT
           echo "version=$(yq '.version' config.yaml)" >> $GITHUB_OUTPUT
 
@@ -65,5 +65,5 @@ jobs:
           version: ${{ steps.config.outputs.version }}
           build-args: |
             BUILD_FROM=${{ steps.config.outputs.build_from }}
-            librtlsdrRepo=${{ steps.config.outputs.librtlsdr_repo }}
+            librtlsdrGitRevision=${{ steps.config.outputs.librtlsdr_git_revision }}
             rtl433GitRevision=${{ steps.config.outputs.rtl433_git_revision }}
