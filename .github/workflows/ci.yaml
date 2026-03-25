@@ -1,8 +1,9 @@
 name: CI
 
 env:
-  BUILD_ARGS: "--test"
   MONITORED_FILES: "build.yaml config.yaml Dockerfile run.sh rtl_433.conf.template"
+  ARCHITECTURES: '["amd64", "aarch64"]'
+  IMAGE_NAME: rtl433-addon
 
 on:
   push:
@@ -16,8 +17,11 @@ jobs:
   init:
     runs-on: ubuntu-latest
     name: Initialize builds
+    permissions:
+      contents: read
     outputs:
       changed: ${{ steps.changed_addons.outputs.changed }}
+      matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
       - name: Check out the repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -39,14 +43,22 @@ jobs:
           echo "No monitored files changed (${{ env.MONITORED_FILES }})";
           echo "changed=false" >> $GITHUB_OUTPUT;
 
+      - name: Get build matrix
+        if: steps.changed_addons.outputs.changed == 'true'
+        id: matrix
+        uses: home-assistant/builder/actions/prepare-multi-arch-matrix@62a1597b84b3461abad9816d9cd92862a2b542c3 # 2026.03.2
+        with:
+          architectures: ${{ env.ARCHITECTURES }}
+          image-name: ${{ env.IMAGE_NAME }}
+
   build:
     needs: init
-    runs-on: ubuntu-latest
     if: needs.init.outputs.changed == 'true'
+    runs-on: ${{ matrix.os }}
     name: Build ${{ matrix.arch }} add-on
     strategy:
-      matrix:
-        arch: ["armhf", "armv7", "aarch64", "amd64", "i386"]
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.init.outputs.matrix) }}
     permissions:
       contents: read
 
@@ -54,34 +66,26 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Get information
-        id: info
-        uses: home-assistant/actions/helpers/info@d56d093b9ab8d2105bc0cb6ee9bcc0ef4ec8b96d # master
-        with:
-          path: "./"
-
-      - name: Check if add-on should be built
-        id: check
+      - name: Get build configuration
+        id: config
+        env:
+          ARCH: ${{ matrix.arch }}
         run: |
-          if [[ "${{ steps.info.outputs.image }}" == "null" ]]; then
-            echo "Image property is not defined, skipping build"
-            echo "build_arch=false" >> $GITHUB_OUTPUT;
-          elif [[ "${{ steps.info.outputs.architectures }}" =~ ${{ matrix.arch }} ]]; then
-            echo "build_arch=true" >> $GITHUB_OUTPUT;
-            echo "image=$(echo ${{ steps.info.outputs.image }} | cut -d'/' -f3)" >> $GITHUB_OUTPUT;
-          else
-            echo "${{ matrix.arch }} is not a valid arch for this add-on, skipping build";
-            echo "build_arch=false" >> $GITHUB_OUTPUT;
-          fi
+          echo "build_from=$(yq ".build_from.${ARCH}" build.yaml)" >> $GITHUB_OUTPUT
+          echo "librtlsdr_repo=$(yq '.args.librtlsdrRepo' build.yaml)" >> $GITHUB_OUTPUT
+          echo "rtl433_git_revision=$(yq '.args.rtl433GitRevision' build.yaml)" >> $GITHUB_OUTPUT
 
       - name: Build add-on
-        if: steps.check.outputs.build_arch == 'true'
-        uses: home-assistant/builder@6cb4fd3d1338b6e22d0958a4bcb53e0965ea63b4 # 2026.02.1
+        uses: home-assistant/builder/actions/build-image@62a1597b84b3461abad9816d9cd92862a2b542c3 # 2026.03.2
         with:
-          args: |
-            ${{ env.BUILD_ARGS }} \
-            --${{ matrix.arch }} \
-            --target /data \
-            --image "${{ steps.check.outputs.image }}" \
-            --docker-hub "ghcr.io/${{ github.repository_owner }}" \
-            --addon
+          arch: ${{ matrix.arch }}
+          container-registry-password: ${{ secrets.GITHUB_TOKEN }}
+          cosign: "false"
+          image: ${{ matrix.image }}
+          image-tags: test
+          push: "false"
+          version: test
+          build-args: |
+            BUILD_FROM=${{ steps.config.outputs.build_from }}
+            librtlsdrRepo=${{ steps.config.outputs.librtlsdr_repo }}
+            rtl433GitRevision=${{ steps.config.outputs.rtl433_git_revision }}
