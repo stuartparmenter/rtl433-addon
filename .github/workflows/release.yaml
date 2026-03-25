@@ -15,6 +15,7 @@ jobs:
   init:
     runs-on: ubuntu-latest
     name: Initialize build
+    permissions: {}
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
