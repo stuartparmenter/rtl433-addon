@@ -4,55 +4,66 @@ on:
   release:
     types: [published]
 
+env:
+  ARCHITECTURES: '["amd64", "aarch64"]'
+  IMAGE_NAME: rtl433-addon
+
+concurrency:
+  group: release-${{ github.ref }}
+
 jobs:
-  release:
+  init:
     runs-on: ubuntu-latest
-    name: Build and publish release
+    name: Initialize build
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - name: Get build matrix
+        id: matrix
+        uses: home-assistant/builder/actions/prepare-multi-arch-matrix@62a1597b84b3461abad9816d9cd92862a2b542c3 # 2026.03.2
+        with:
+          architectures: ${{ env.ARCHITECTURES }}
+          image-name: ${{ env.IMAGE_NAME }}
+
+  build:
+    needs: init
+    runs-on: ${{ matrix.os }}
+    name: Build and publish ${{ matrix.arch }} add-on
     strategy:
-      matrix:
-        arch: ["armhf", "armv7", "aarch64", "amd64", "i386"]
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.init.outputs.matrix) }}
     permissions:
       contents: read
+      id-token: write
       packages: write
 
     steps:
       - name: Check out repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Get information
-        id: info
-        uses: home-assistant/actions/helpers/info@d56d093b9ab8d2105bc0cb6ee9bcc0ef4ec8b96d # master
-        with:
-          path: "./"
-
-      - name: Check if add-on should be built
-        id: check
+      - name: Get build configuration
+        id: config
+        env:
+          ARCH: ${{ matrix.arch }}
         run: |
-          if [[ "${{ steps.info.outputs.image }}" == "null" ]]; then
-            echo "Image property is not defined, skipping build"
-            echo "build_arch=false" >> $GITHUB_OUTPUT;
-          elif [[ "${{ steps.info.outputs.architectures }}" =~ ${{ matrix.arch }} ]]; then
-            echo "build_arch=true" >> $GITHUB_OUTPUT;
-            echo "image=$(echo ${{ steps.info.outputs.image }} | cut -d'/' -f3)" >> $GITHUB_OUTPUT;
-          else
-            echo "${{ matrix.arch }} is not a valid arch for this add-on, skipping build";
-            echo "build_arch=false" >> $GITHUB_OUTPUT;
-          fi
-
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          echo "build_from=$(yq ".build_from.${ARCH}" build.yaml)" >> $GITHUB_OUTPUT
+          echo "librtlsdr_repo=$(yq '.args.librtlsdrRepo' build.yaml)" >> $GITHUB_OUTPUT
+          echo "rtl433_git_revision=$(yq '.args.rtl433GitRevision' build.yaml)" >> $GITHUB_OUTPUT
+          echo "version=$(yq '.version' config.yaml)" >> $GITHUB_OUTPUT
 
       - name: Build and push add-on
-        if: steps.check.outputs.build_arch == 'true'
-        uses: home-assistant/builder@6cb4fd3d1338b6e22d0958a4bcb53e0965ea63b4 # 2026.02.1
+        uses: home-assistant/builder/actions/build-image@62a1597b84b3461abad9816d9cd92862a2b542c3 # 2026.03.2
         with:
-          args: |
-            --${{ matrix.arch }} \
-            --target /data \
-            --image "${{ steps.check.outputs.image }}" \
-            --docker-hub "ghcr.io/${{ github.repository_owner }}" \
-            --addon
+          arch: ${{ matrix.arch }}
+          container-registry-password: ${{ secrets.GITHUB_TOKEN }}
+          cosign: "true"
+          image: ${{ matrix.image }}
+          image-tags: |
+            ${{ steps.config.outputs.version }}
+            latest
+          push: "true"
+          version: ${{ steps.config.outputs.version }}
+          build-args: |
+            BUILD_FROM=${{ steps.config.outputs.build_from }}
+            librtlsdrRepo=${{ steps.config.outputs.librtlsdr_repo }}
+            rtl433GitRevision=${{ steps.config.outputs.rtl433_git_revision }}
